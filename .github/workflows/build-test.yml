@@ -29,12 +29,6 @@ jobs:
         with:
           node-version: 20
           check-latest: true
-      - name: Add 8G Swap
-        run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
       - name: Prepare
         run: |
           sudo apt update
