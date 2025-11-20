@@ -8,10 +8,10 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
-        target: [XY-C1,NEWIFI]
+        target: [XY-C1]
         toolchain: [mipsel-linux-musl]
     steps:
       - uses: actions/checkout@v3
