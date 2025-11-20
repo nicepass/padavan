@@ -1,0 +1,48 @@
+name: build
+
+on: 
+  #push:
+   # branches:
+   # - "*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [XY-C1,NEWIFI]
+        toolchain: [mipsel-linux-musl]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: dev
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.target }}-${{ matrix.toolchain }}
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.23.0'
+          check-latest: true
+          cache: false
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          check-latest: true
+      - name: Add 8GB Swap
+          run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+      - name: Prepare
+        run: |
+          sudo apt update
+          sudo apt install git gperf automake autopoint bison flex gawk gettext libtool libtool-bin pkg-config gcc-multilib g++-multilib python3-docutils zlib1g-dev liblzma-dev libssl-dev ccache
+      - name: Build
+        run: |
+          make ${{ matrix.target }} TOOLCHAIN=${{ matrix.toolchain }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ matrix.toolchain }}
+          path: trunk/images/*.trx
