@@ -1,4 +1,4 @@
-name: Build Padavan (Correct Node + Go + Container Layout)
+name: Build Padavan (with Node & Go & Ubuntu 18.04 container)
 
 on:
   workflow_dispatch:
@@ -13,12 +13,13 @@ jobs:
 
     steps:
       # -----------------------------
-      # Step 1: Checkout
+      # Step 1: Checkout repository
       # -----------------------------
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       # -----------------------------
-      # Step 2: Install Node.js 20 on host
+      # Step 2: Install Node.js 20 (宿主机)
       # -----------------------------
       - name: Setup Node.js 20
         uses: actions/setup-node@v3
@@ -26,7 +27,7 @@ jobs:
           node-version: 20
 
       # -----------------------------
-      # Step 3: Install Go 1.23 on host
+      # Step 3: Install Go 1.23 (宿主机)
       # -----------------------------
       - name: Setup Go
         uses: actions/setup-go@v4
@@ -34,18 +35,18 @@ jobs:
           go-version: 1.23.0
 
       # -----------------------------
-      # optional：Node/Go 插件构建（宿主机）
+      # Step 4: Optional plugin build (Node/Go)
       # -----------------------------
       - name: Build Third-Party Plugins
         run: |
-          echo ">>> 构建 Node/Go 插件（如果需要）"
+          echo ">>> 如需构建第三方插件，请在此加入命令"
           # 示例：
-          # npm install --prefix thirdparty/webui
-          # npm run build --prefix thirdparty/webui
-          # go build -o thirdparty/app cmd/main.go
+          # npm install --prefix thirdparty/ui
+          # npm run build --prefix thirdparty/ui
+          # go build -o thirdparty/bin/app thirdparty/cmd/main.go
 
       # -----------------------------
-      # Step 4: Add 8GB Swap（内核大编译）
+      # Step 5: Add 8GB Swap (修复内核 OOM)
       # -----------------------------
       - name: Add 8GB Swap
         run: |
@@ -55,30 +56,34 @@ jobs:
           sudo swapon /swapfile
 
       # -----------------------------
-      # Step 5: Build Padavan inside Ubuntu 18.04 container
+      # Step 6: Build Padavan inside Ubuntu 18.04 container
       # -----------------------------
       - name: Build Padavan inside Ubuntu 18.04 container
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
           docker run --rm \
             -v $PWD:/src \
             -w /src \
+            -e TARGET=$TARGET \
+            -e TOOLCHAIN=$TOOLCHAIN \
             ubuntu:18.04 \
             bash -c "
               set -e
+
+              echo '>>> 更新并安装工具链依赖'
               apt-get update
               apt-get install -y build-essential g++ gcc make git gperf bison flex \
                 libtool libtool-bin autopoint gettext python3-docutils \
                 zlib1g-dev liblzma-dev libssl-dev pkg-config curl wget xz-utils
 
-              echo '>>> 开始编译 Padavan'
-              make ${TARGET} TOOLCHAIN=${TOOLCHAIN}
+              echo '>>> 开始编译 Padavan（容器内 glibc=2.27）'
+              make \$TARGET TOOLCHAIN=\$TOOLCHAIN
             "
-        env:
-          TARGET: ${{ matrix.target }}
-          TOOLCHAIN: ${{ matrix.toolchain }}
 
       # -----------------------------
-      # Step 6: Upload Firmware
+      # Step 7: Upload firmware
       # -----------------------------
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
