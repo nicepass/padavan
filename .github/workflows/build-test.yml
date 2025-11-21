@@ -1,42 +1,81 @@
-name: build-test
+name: Build Padavan (Docker 18.04 + Go + Node)
 
-on: 
-  #push:
-   # branches:
-   # - "*"
+on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04   # GitHub Runner 系统版本不影响 glibc（容器内运行）
     strategy:
       matrix:
         target: [XY-C1]
         toolchain: [mipsel-linux-musl]
+
     steps:
-      - uses: actions/checkout@v3
-        with:
-          ref: dev
-      - uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ matrix.target }}-${{ matrix.toolchain }}
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.23.0'
-          check-latest: true
-          cache: false
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          check-latest: true
-      - name: Prepare
+      # -----------------------------
+      # Step 1: 拉取仓库
+      # -----------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------
+      # Step 2: 添加 8GB Swap（防止内核 OOM）
+      # -----------------------------
+      - name: Add 8GB Swap
         run: |
-          sudo apt update
-          sudo apt install git gperf automake autopoint bison flex gawk gettext libtool libtool-bin pkg-config gcc-multilib g++-multilib python3-docutils zlib1g-dev liblzma-dev libssl-dev ccache
-      - name: Build
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+      # ------------------------------------------------------------
+      # Step 3: 在 Ubuntu 18.04 容器中构建（完全隔离 glibc）
+      # ------------------------------------------------------------
+      - name: Build Padavan inside Ubuntu 18.04 container
         run: |
-          make ${{ matrix.target }} TOOLCHAIN=${{ matrix.toolchain }}
-      - uses: actions/upload-artifact@v4
+          docker run --rm \
+            -v $PWD:/src \
+            -w /src \
+            ubuntu:18.04 \
+            bash -c "
+              set -e
+
+              echo '>>> 更新基础环境'
+              apt-get update
+              apt-get install -y build-essential g++ gcc make git gperf bison flex \
+                libtool libtool-bin autopoint gettext python3-docutils \
+                zlib1g-dev liblzma-dev libssl-dev pkg-config curl wget xz-utils
+
+              echo '>>> 安装 Go 1.23.0'
+              GO_VERSION=1.23.0
+              wget https://go.dev/dl/go\${GO_VERSION}.linux-amd64.tar.gz
+              tar -C /usr/local -xzf go\${GO_VERSION}.linux-amd64.tar.gz
+              export PATH=\$PATH:/usr/local/go/bin
+              go version
+
+              echo '>>> 安装 Node.js 20'
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+              apt-get install -y nodejs
+              node -v
+              npm -v
+
+              echo '>>> （可选）构建第三方插件，如需 npm install/go build 可放在这里'
+              # npm install --prefix thirdparty/pluginA
+              # npm run build --prefix thirdparty/pluginA
+              # go build -o thirdparty/app cmd/main.go
+
+              echo '>>> 正式开始编译 Padavan'
+              make ${TARGET} TOOLCHAIN=${TOOLCHAIN}
+            "
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: ${{ matrix.toolchain }}
+
+      # -----------------------------
+      # Step 4: 上传固件
+      # -----------------------------
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-${{ matrix.toolchain }}
           path: trunk/images/*.trx
