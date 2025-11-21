@@ -1,4 +1,4 @@
-name: Build Padavan (with Node & Go & Ubuntu 18.04 container)
+name: Build Padavan (Fully Isolated Ubuntu 18.04 RootFS Build)
 
 on:
   workflow_dispatch:
@@ -13,21 +13,21 @@ jobs:
 
     steps:
       # -----------------------------
-      # Step 1: Checkout repository
+      # Step 1: Checkout
       # -----------------------------
-      - name: Checkout
+      - name: Checkout Repo
         uses: actions/checkout@v4
 
       # -----------------------------
-      # Step 2: Install Node.js 20 (宿主机)
+      # Step 2: Install Node.js 20
       # -----------------------------
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20
 
       # -----------------------------
-      # Step 3: Install Go 1.23 (宿主机)
+      # Step 3: Install Go 1.23
       # -----------------------------
       - name: Setup Go
         uses: actions/setup-go@v4
@@ -35,18 +35,18 @@ jobs:
           go-version: 1.23.0
 
       # -----------------------------
-      # Step 4: Optional plugin build (Node/Go)
+      # Step 4: Build Plugins (optional)
       # -----------------------------
       - name: Build Third-Party Plugins
         run: |
-          echo ">>> 如需构建第三方插件，请在此加入命令"
+          echo ">>> 如需构建第三方插件，在此添加命令"
           # 示例：
           # npm install --prefix thirdparty/ui
           # npm run build --prefix thirdparty/ui
-          # go build -o thirdparty/bin/app thirdparty/cmd/main.go
+          # go build -o thirdparty/app thirdparty/cmd/main.go
 
       # -----------------------------
-      # Step 5: Add 8GB Swap (修复内核 OOM)
+      # Step 5: Add Swap
       # -----------------------------
       - name: Add 8GB Swap
         run: |
@@ -56,37 +56,57 @@ jobs:
           sudo swapon /swapfile
 
       # -----------------------------
-      # Step 6: Build Padavan inside Ubuntu 18.04 container
+      # Step 6: Create Ubuntu 18.04 Container
       # -----------------------------
-      - name: Build Padavan inside Ubuntu 18.04 container
+      - name: Create Ubuntu 18.04 container
+        run: |
+          docker pull ubuntu:18.04
+          docker create --name padavan ubuntu:18.04 sleep infinity
+
+      # -----------------------------
+      # Step 7: Copy source into container
+      # -----------------------------
+      - name: Copy source into container
+        run: |
+          docker cp . padavan:/src
+
+      # -----------------------------
+      # Step 8: Execute build inside container
+      # -----------------------------
+      - name: Build Padavan inside isolated rootfs
         env:
           TARGET: ${{ matrix.target }}
           TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
-          docker run --rm \
-            -v $PWD:/src \
-            -w /src \
-            -e TARGET=$TARGET \
-            -e TOOLCHAIN=$TOOLCHAIN \
-            ubuntu:18.04 \
-            bash -c "
-              set -e
+          docker start padavan
+          docker exec padavan bash -c "
+            set -e
 
-              echo '>>> 更新并安装工具链依赖'
-              apt-get update
-              apt-get install -y build-essential g++ gcc make git gperf bison flex \
-                libtool libtool-bin autopoint gettext python3-docutils \
-                zlib1g-dev liblzma-dev libssl-dev pkg-config curl wget xz-utils
+            echo '>>> Install build dependencies in container'
+            apt-get update
+            apt-get install -y build-essential g++ gcc make git gperf bison flex \
+              libtool libtool-bin autopoint gettext python3-docutils \
+              zlib1g-dev liblzma-dev libssl-dev pkg-config curl wget xz-utils
 
-              echo '>>> 开始编译 Padavan（容器内 glibc=2.27）'
-              make \$TARGET TOOLCHAIN=\$TOOLCHAIN
-            "
+            cd /src
+
+            echo '>>> Start Padavan build (isolated environment, glibc=2.27)'
+            make \$TARGET TOOLCHAIN=\$TOOLCHAIN
+          "
 
       # -----------------------------
-      # Step 7: Upload firmware
+      # Step 9: Copy firmware out of container
+      # -----------------------------
+      - name: Copy firmware out
+        run: |
+          mkdir -p firmware
+          docker cp padavan:/src/trunk/images ./firmware
+
+      # -----------------------------
+      # Step 10: Upload Artifact
       # -----------------------------
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-${{ matrix.toolchain }}
-          path: trunk/images/*.trx
+          path: firmware/*.trx
